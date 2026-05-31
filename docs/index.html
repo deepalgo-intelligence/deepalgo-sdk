@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeepAlgo Sovereign — API Reference</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    a { color: #e85d04; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Layout */
+    .sidebar {
+      position: fixed;
+      top: 0; left: 0;
+      width: 240px;
+      height: 100vh;
+      background: #0d1117;
+      border-right: 1px solid #21262d;
+      overflow-y: auto;
+      padding: 32px 0;
+    }
+
+    .main {
+      margin-left: 240px;
+      max-width: 860px;
+      padding: 48px 56px;
+    }
+
+    /* Sidebar */
+    .sidebar-logo {
+      padding: 0 24px 24px;
+      border-bottom: 1px solid #21262d;
+      margin-bottom: 16px;
+    }
+    .sidebar-logo-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: #e6edf3;
+      letter-spacing: 0.3px;
+    }
+    .sidebar-logo-sub {
+      font-size: 11px;
+      color: #7d8590;
+      margin-top: 2px;
+    }
+
+    .nav-section {
+      padding: 8px 24px 4px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #7d8590;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .nav-link {
+      display: block;
+      padding: 6px 24px;
+      font-size: 13px;
+      color: #7d8590;
+      transition: color 0.15s;
+    }
+    .nav-link:hover { color: #e6edf3; text-decoration: none; }
+    .nav-link.active { color: #e85d04; }
+
+    /* Content */
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: #e6edf3;
+      margin-bottom: 12px;
+      letter-spacing: -0.5px;
+    }
+    h2 {
+      font-size: 20px;
+      font-weight: 600;
+      color: #e6edf3;
+      margin: 48px 0 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #21262d;
+    }
+    h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #e6edf3;
+      margin: 28px 0 10px;
+    }
+    p { margin-bottom: 14px; color: #8b949e; }
+
+    /* Code */
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 13px;
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 4px;
+      padding: 2px 6px;
+      color: #e6edf3;
+    }
+    pre {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 20px 24px;
+      overflow-x: auto;
+      margin: 12px 0 20px;
+    }
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 13px;
+      color: #e6edf3;
+      line-height: 1.7;
+    }
+
+    /* Tags */
+    .tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+      margin-right: 8px;
+    }
+    .tag-get  { background: #1f4e2e; color: #3fb950; }
+    .tag-post { background: #3d2b00; color: #e3b341; }
+    .tag-free { background: #1a1a2e; color: #7d8590; border: 1px solid #30363d; }
+    .tag-pro  { background: #2d1b00; color: #e85d04; border: 1px solid #3d2600; }
+
+    /* Endpoint block */
+    .endpoint {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin: 16px 0;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 14px;
+      color: #e6edf3;
+    }
+    .endpoint-path { color: #79c0ff; }
+
+    /* Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 20px;
+      font-size: 13px;
+    }
+    th {
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid #21262d;
+      color: #7d8590;
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #161b22;
+      color: #8b949e;
+      vertical-align: top;
+    }
+    td:first-child { color: #e6edf3; font-family: monospace; }
+    tr:last-child td { border-bottom: none; }
+
+    /* Alert */
+    .alert {
+      border-left: 3px solid #e85d04;
+      background: #1a1008;
+      padding: 12px 16px;
+      border-radius: 0 6px 6px 0;
+      margin: 16px 0;
+      font-size: 13px;
+      color: #8b949e;
+    }
+
+    /* Tier badge */
+    .tier-row td:last-child { text-align: center; }
+    .check { color: #3fb950; font-size: 16px; }
+    .dash  { color: #30363d; font-size: 16px; }
+
+    /* Hero */
+    .hero-meta {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 32px;
+      flex-wrap: wrap;
+    }
+    .hero-badge {
+      font-size: 12px;
+      color: #7d8590;
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 20px;
+      padding: 4px 12px;
+    }
+    .hero-badge a { color: #7d8590; }
+    .hero-badge a:hover { color: #e85d04; text-decoration: none; }
+
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .main { margin-left: 0; padding: 32px 24px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <div class="sidebar-logo-name">DeepAlgo Sovereign</div>
+    <div class="sidebar-logo-sub">API Reference · v4.1</div>
+  </div>
+
+  <div class="nav-section">Getting Started</div>
+  <a class="nav-link" href="#overview">Overview</a>
+  <a class="nav-link" href="#authentication">Authentication</a>
+  <a class="nav-link" href="#quickstart">Quick Start</a>
+
+  <div class="nav-section">Endpoints</div>
+  <a class="nav-link" href="#regime">GET /regime/{asset}</a>
+  <a class="nav-link" href="#entry-signal">GET /entry-signal/{instrument}</a>
+  <a class="nav-link" href="#validate">POST /v1/validate_sequence</a>
+  <a class="nav-link" href="#register">POST /register/free</a>
+  <a class="nav-link" href="#health">GET /health</a>
+
+  <div class="nav-section">Reference</div>
+  <a class="nav-link" href="#rate-limits">Rate Limits</a>
+  <a class="nav-link" href="#errors">Error Codes</a>
+  <a class="nav-link" href="#instruments">Instruments</a>
+  <a class="nav-link" href="#tiers">Tier Access</a>
+
+  <div class="nav-section">SDK</div>
+  <a class="nav-link" href="https://github.com/deepalgo-intelligence/deepalgo-sdk" target="_blank">GitHub ↗</a>
+  <a class="nav-link" href="https://pypi.org/project/deepalgo-sovereign/" target="_blank">PyPI ↗</a>
+  <a class="nav-link" href="https://gateway.deepalgo.co.uk" target="_blank">Get API Key ↗</a>
+</nav>
+
+<!-- Main content -->
+<main class="main">
+
+  <h1>DeepAlgo Sovereign API</h1>
+  <div class="hero-meta">
+    <span class="hero-badge">Base URL: api.deepalgo.co.uk</span>
+    <span class="hero-badge">API v4.1</span>
+    <span class="hero-badge"><a href="https://pypi.org/project/deepalgo-sovereign/">pip install deepalgo-sovereign</a></span>
+  </div>
+  <p>Institutional AI regime classification, OU-calibrated entry signal quality, and order-flow intelligence across FX, metals, indices, and commodities. Three-lock validation stack: Regime Classification → Structural Noise Filter → Sequence Validation.</p>
+
+  <!-- AUTHENTICATION -->
+  <h2 id="authentication">Authentication</h2>
+  <p>All endpoints except <code>GET /health</code> and <code>POST /register/free</code> require an API key passed in the request header.</p>
+  <pre><code>X-DeepAlgo-Key: your_api_key_here</code></pre>
+  <p>Get a free key instantly — no card required:</p>
+  <pre><code>curl -X POST https://api.deepalgo.co.uk/register/free \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@email.com"}'</code></pre>
+
+  <!-- QUICK START -->
+  <h2 id="quickstart">Quick Start</h2>
+  <pre><code>pip install deepalgo-sovereign</code></pre>
+  <pre><code>from deepalgo_sovereign import DeepAlgoClient
+
+# Register for a free key
+DeepAlgoClient.enroll("you@email.com")
+
+# Use your key
+client = DeepAlgoClient(api_key="your_key_here")
+
+regime = client.verify_regime("EUR_USD")
+if regime["is_favorable"]:
+    signal = client.get_entry_signal("EUR_USD")
+    print(f"Entry quality: {signal['entry_quality']}")
+    print(f"Wait {signal['recommended_delay_candles']} candles")</code></pre>
+
+  <!-- REGIME -->
+  <h2 id="regime">GET /regime/{asset}</h2>
+  <div class="endpoint">
+    <span class="tag tag-get">GET</span>
+    <span class="endpoint-path">/regime/{asset}</span>
+  </div>
+  <p>Returns the AI regime verdict for an instrument. Runs the full three-lock validation stack: Regime Classification (Lock 1) → Structural Noise Filter (Lock 2) → Sequence Validation (Lock 3).</p>
+
+  <h3>Parameters</h3>
+  <table>
+    <tr><th>Name</th><th>In</th><th>Type</th><th>Description</th></tr>
+    <tr><td>asset</td><td>path</td><td>string</td><td>OANDA instrument name, e.g. <code>EUR_USD</code>, <code>XAU_USD</code></td></tr>
+    <tr><td>use_tlock</td><td>query</td><td>boolean</td><td>Enable Sequence Validation (Lock 3). Default: <code>true</code></td></tr>
+  </table>
+
+  <h3>Example request</h3>
+  <pre><code>curl -s -H "X-DeepAlgo-Key: your_key_here" \
+  "https://api.deepalgo.co.uk/regime/EUR_USD" | python3 -m json.tool</code></pre>
+
+  <h3>Example response</h3>
+  <pre><code>{
+  "instrument": "EUR_USD",
+  "is_favorable": false,
+  "divergence": "NONE",
+  "stability_score": "57.3%",
+  "veto_reason": "REGIME_VETO",
+  "metrics": {
+    "regime": "TRENDING_RISK",
+    "entropy": 0.547,
+    "lock3_score": 0.77,
+    "composite_confidence": 0.021
+  }
+}</code></pre>
+
+  <h3>Response fields</h3>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td>is_favorable</td><td>boolean</td><td><code>true</code> if all active locks pass — safe to evaluate entry</td></tr>
+    <tr><td>veto_reason</td><td>string | null</td><td><code>REGIME_VETO</code>, <code>TRANSFORMER_VETO</code>, <code>KS_BLOCK</code>, or <code>null</code> if favorable</td></tr>
+    <tr><td>stability_score</td><td>string</td><td>Composite regime stability as a percentage</td></tr>
+    <tr><td>divergence</td><td>string</td><td>Cross-asset divergence signal: <code>NONE</code>, <code>MILD</code>, <code>STRONG</code></td></tr>
+    <tr><td>metrics.regime</td><td>string</td><td><code>MEAN_REVERTING</code>, <code>TRENDING_RISK</code>, or <code>NEUTRAL</code></td></tr>
+    <tr><td>metrics.entropy</td><td>float</td><td>Shannon entropy of recent price action (0–1). Below 0.80 required to pass.</td></tr>
+    <tr><td>metrics.lock3_score</td><td>float</td><td>Sequence Validation model confidence (0–1)</td></tr>
+  </table>
+
+  <!-- ENTRY SIGNAL -->
+  <h2 id="entry-signal">GET /entry-signal/{instrument}</h2>
+  <div class="endpoint">
+    <span class="tag tag-get">GET</span>
+    <span class="endpoint-path">/entry-signal/{instrument}</span>
+    <span class="tag tag-pro">Professional+</span>
+  </div>
+  <p>Returns OU-calibrated entry timing quality. Derived from 60-day Information Coefficient analysis across 76 instruments — tells you not just whether the regime is right, but whether this specific moment is a statistically optimal entry point.</p>
+
+  <h3>Example request</h3>
+  <pre><code>curl -s -H "X-DeepAlgo-Key: your_key_here" \
+  "https://api.deepalgo.co.uk/entry-signal/GBP_USD" | python3 -m json.tool</code></pre>
+
+  <h3>Example response</h3>
+  <pre><code>{
+  "instrument": "GBP_USD",
+  "entry_quality": "MEDIUM",
+  "current_ou_z": 0.663,
+  "ou_z_threshold": 0.50,
+  "recommended_delay_candles": 5,
+  "best_confirmation_signal": "rsi",
+  "calibrated": true
+}</code></pre>
+
+  <h3>Response fields</h3>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td>entry_quality</td><td>string</td><td><code>HIGH</code> (z ≥ 0.75), <code>MEDIUM</code> (z ≥ 0.50), <code>LOW</code>, or <code>NO_DATA</code></td></tr>
+    <tr><td>current_ou_z</td><td>float</td><td>Live OU z-score — deviation from mean-reversion equilibrium in σ</td></tr>
+    <tr><td>ou_z_threshold</td><td>float</td><td>Calibrated entry threshold from IC analysis for this instrument</td></tr>
+    <tr><td>recommended_delay_candles</td><td>int</td><td>Optimal M5 candle wait after signal touch before entering</td></tr>
+    <tr><td>best_confirmation_signal</td><td>string</td><td>Highest-IC confirmation signal at optimal lag: <code>rsi</code>, <code>body_pct</code>, <code>rsi_divergence</code></td></tr>
+    <tr><td>calibrated</td><td>boolean</td><td><code>false</code> if instrument has insufficient calibration data</td></tr>
+  </table>
+
+  <!-- VALIDATE SEQUENCE -->
+  <h2 id="validate">POST /v1/validate_sequence</h2>
+  <div class="endpoint">
+    <span class="tag tag-post">POST</span>
+    <span class="endpoint-path">/v1/validate_sequence</span>
+  </div>
+  <p>Runs the full three-lock validation stack using 60 M5 candles of OHLCV data you supply. Use this when you want to validate against your own data feed rather than OANDA.</p>
+
+  <h3>Request body</h3>
+  <pre><code>{
+  "asset": "EUR_USD",
+  "candles": [
+    {"time": "2026-05-31T10:00:00Z", "open": 1.0821, "high": 1.0835,
+     "low": 1.0818, "close": 1.0829, "volume": 1200},
+    ...  // 60 candles required
+  ]
+}</code></pre>
+
+  <h3>Example response</h3>
+  <pre><code>{
+  "is_authorized": true,
+  "verdict": "AUTHORIZED"
+}</code></pre>
+
+  <!-- REGISTER -->
+  <h2 id="register">POST /register/free</h2>
+  <div class="endpoint">
+    <span class="tag tag-post">POST</span>
+    <span class="endpoint-path">/register/free</span>
+    <span class="tag tag-free">No auth required</span>
+  </div>
+  <p>Provisions a free API key and delivers it by email within seconds. Rate-limited to 5 requests per IP per hour.</p>
+
+  <h3>Request body</h3>
+  <pre><code>{ "email": "you@email.com" }</code></pre>
+
+  <h3>Response</h3>
+  <pre><code>{ "status": "ok", "message": "Check your inbox for your free API key." }</code></pre>
+
+  <!-- HEALTH -->
+  <h2 id="health">GET /health</h2>
+  <div class="endpoint">
+    <span class="tag tag-get">GET</span>
+    <span class="endpoint-path">/health</span>
+    <span class="tag tag-free">No auth required</span>
+  </div>
+  <p>Returns API status, circuit breaker state, and per-lock health. Use this to monitor uptime or check the system before making regime calls.</p>
+
+  <h3>Example request</h3>
+  <pre><code>curl -s https://api.deepalgo.co.uk/health | python3 -m json.tool</code></pre>
+
+  <h3>Example response</h3>
+  <pre><code>{
+  "status": "healthy",
+  "api_version": "4.1",
+  "circuit_breaker": { "state": "closed", "strikes": 0 },
+  "locks": {
+    "lock1_regime_classification":  { "status": "ok" },
+    "lock2_noise_filter":           { "status": "ok" },
+    "lock3_sequence_validation":    { "status": "ok" }
+  },
+  "network_vpin": 0.286
+}</code></pre>
+
+  <!-- RATE LIMITS -->
+  <h2 id="rate-limits">Rate Limits</h2>
+  <table>
+    <tr><th>Tier</th><th>Calls / day</th><th>Instruments</th><th>Endpoints</th></tr>
+    <tr><td>Free</td><td>50</td><td>4</td><td>/regime/, /health, /register/free</td></tr>
+    <tr><td>Professional</td><td>Unlimited</td><td>15</td><td>All including /entry-signal/</td></tr>
+    <tr><td>Institutional</td><td>Unlimited</td><td>All 76+</td><td>All + order-flow VPIN</td></tr>
+  </table>
+  <p>Rate limit errors return HTTP <code>429</code>. The <code>Retry-After</code> header indicates when the window resets.</p>
+
+  <!-- ERRORS -->
+  <h2 id="errors">Error Codes</h2>
+  <table>
+    <tr><th>HTTP</th><th>Code</th><th>Meaning</th></tr>
+    <tr><td>401</td><td>INVALID_KEY</td><td>API key not recognised</td></tr>
+    <tr><td>403</td><td>NODE_NOT_SUBSCRIBED</td><td>Instrument not in your tier's allowed list</td></tr>
+    <tr><td>422</td><td>VALIDATION_ERROR</td><td>Invalid email or malformed request body</td></tr>
+    <tr><td>429</td><td>RATE_LIMITED</td><td>Daily call limit reached for your tier</td></tr>
+    <tr><td>503</td><td>CIRCUIT_OPEN</td><td>API circuit breaker open — check /health</td></tr>
+  </table>
+
+  <!-- INSTRUMENTS -->
+  <h2 id="instruments">Supported Instruments</h2>
+  <table>
+    <tr><th>Asset Class</th><th>Examples</th><th>Count</th></tr>
+    <tr><td>FX Majors</td><td>EUR_USD, GBP_USD, USD_JPY, AUD_USD, USD_CAD, USD_CHF, NZD_USD</td><td>7</td></tr>
+    <tr><td>FX Minors / Crosses</td><td>EUR_JPY, GBP_JPY, EUR_GBP, AUD_JPY, GBP_CHF, EUR_CHF…</td><td>30+</td></tr>
+    <tr><td>Metals</td><td>XAU_USD, XAG_USD, XAU_EUR, XAU_JPY, XAU_AUD</td><td>5</td></tr>
+    <tr><td>Indices</td><td>SPX500_USD, NAS100_USD, US30_USD, EU50_EUR, DE30_EUR, JP225_USD</td><td>6</td></tr>
+    <tr><td>Commodities</td><td>NATGAS_USD, SUGAR_USD, WHEAT_USD, SOYBN_USD, CORN_USD</td><td>5+</td></tr>
+    <tr><td>Bonds</td><td>DE10YB_EUR, USB10Y_USD</td><td>2</td></tr>
+  </table>
+
+  <!-- TIERS -->
+  <h2 id="tiers">Tier Access</h2>
+  <table class="tier-row">
+    <tr><th>Feature</th><th>Free</th><th>Professional</th><th>Institutional</th></tr>
+    <tr><td>verify_regime()</td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+    <tr><td>get_entry_signal()</td><td><span class="dash">—</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+    <tr><td>validate_sequence()</td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+    <tr><td>Order-flow VPIN</td><td><span class="dash">—</span></td><td><span class="dash">—</span></td><td><span class="check">✓</span></td></tr>
+    <tr><td>Network Intelligence</td><td><span class="dash">—</span></td><td><span class="dash">—</span></td><td><span class="check">✓</span></td></tr>
+    <tr><td>Instruments</td><td>4</td><td>15</td><td>76+</td></tr>
+    <tr><td>Daily calls</td><td>50</td><td>Unlimited</td><td>Unlimited</td></tr>
+  </table>
+  <p>Upgrade at <a href="https://gateway.deepalgo.co.uk">gateway.deepalgo.co.uk</a> — Professional and Institutional plans available.</p>
+
+  <div style="margin-top:64px;padding-top:24px;border-top:1px solid #21262d;font-size:12px;color:#7d8590;">
+    DeepAlgo Intelligence &nbsp;·&nbsp; <a href="mailto:support@deepalgo.co.uk">support@deepalgo.co.uk</a> &nbsp;·&nbsp;
+    <a href="https://github.com/deepalgo-intelligence/deepalgo-sdk">GitHub</a> &nbsp;·&nbsp;
+    <a href="https://gateway.deepalgo.co.uk">Get API Key</a>
+  </div>
+
+</main>
+</body>
+</html>
