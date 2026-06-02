@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.2.1] — 2026-06-02
+
+### Added
+- `client.check_lock(instrument, injected_data=None)` — binary EXECUTE / VETO decision
+  for wiring directly into an execution management system or order router. Calls
+  `POST /v1/bridge/check-lock`. Returns `authorized` bool, `decision` string, and full
+  forensics payload: failed lock name, VPIN toxicity, pip multiplier, VWAP deviation,
+  estimated slippage, and suggested max clip size. Graceful `CONNECTION_ERROR` fallback
+  matches the existing `verify_regime()` pattern.
+- `SovereignClient` — alias for `DeepAlgoClient`. Both names import correctly:
+  `from deepalgo_sovereign import SovereignClient`.
+
+### Fixed
+- `verify_regime()` response documentation corrected. Previous README showed
+  `regime_label`, `lock1_pass`, `lock2_pass`, `lock3_pass` fields which do not exist
+  in the API response. Correct fields are `is_favorable`, `veto_reason`,
+  `stability_score`, `metrics.regime`, `metrics.composite_confidence`,
+  `metrics.vpin_at_time`, `metrics.entropy_scalar`, and related `metrics.*` keys.
+
+### Removed
+- `validate_sequence()` — was calling `/v1/validate_sequence` which does not exist.
+  `check_lock()` is the correct equivalent for EMS integration.
+
+---
+
 ## [0.2.0] — 2026-05-31
 
 ### Added
