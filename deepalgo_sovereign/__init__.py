@@ -1,4 +1,6 @@
 from .client import DeepAlgoClient
 
-__version__ = "0.2.0"
-__all__ = ["DeepAlgoClient"]
+SovereignClient = DeepAlgoClient  # alias — both names work
+
+__version__ = "0.2.1"
+__all__ = ["DeepAlgoClient", "SovereignClient"]

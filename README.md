@@ -25,15 +25,12 @@ DeepAlgoClient.enroll("you@email.com")
 client = DeepAlgoClient(api_key="your_key_here")
 
 regime = client.verify_regime("EUR_USD")
-print(regime)
-# {
-#   "is_favorable": True,
-#   "regime_label": "MEAN_REVERTING",
-#   "lock1_pass": True,
-#   "lock2_pass": True,
-#   "lock3_pass": True,
-#   "veto_reason": None
-# }
+print(regime["is_favorable"])                        # True
+print(regime["veto_reason"])                         # None  (or a veto code)
+print(regime["metrics"]["regime"])                   # "MEAN_REVERTING"
+print(regime["metrics"]["composite_confidence"])     # 0.7843
+print(regime["metrics"]["vpin_at_time"])             # 0.31
+print(regime["stability_score"])                     # "82.4%"
 ```
 
 ### 3. Check entry signal quality
@@ -80,12 +77,38 @@ Returns the AI regime verdict for an instrument.
 
 | Field | Type | Description |
 |---|---|---|
-| `is_favorable` | bool | `True` if all active locks pass |
-| `regime_label` | str | `MEAN_REVERTING`, `TRENDING`, or `NEUTRAL` |
-| `lock1_pass` | bool | Regime Classification gate |
-| `lock2_pass` | bool | Structural Noise Filter gate |
-| `lock3_pass` | bool | Sequence Validation gate (only if `use_tlock=True`) |
-| `veto_reason` | str \| None | Reason for veto if `is_favorable` is `False` |
+| `is_favorable` | bool | `True` if all three locks pass |
+| `veto_reason` | str \| None | Gate that blocked — `REGIME_VETO`, `AI_PROXY_VETO`, `TRANSFORMER_VETO`, `ENTROPY_VETO`, or `None` |
+| `stability_score` | str | Lock 2 neural stability as a percentile, e.g. `"82.4%"` |
+| `divergence` | str | Divergence label — `"NONE"` when regime is clean |
+| `metrics.regime` | str | HMM state — `"MEAN_REVERTING"`, `"TRENDING"`, `"HIGH_VOL"` |
+| `metrics.composite_confidence` | float | Combined confidence after all scalars applied |
+| `metrics.entropy` | float | Shannon entropy of return distribution (0–1) |
+| `metrics.vpin_at_time` | float | VPIN at scan time — > 0.80 = predatory flow |
+| `metrics.entropy_scalar` | float | Confidence multiplier from entropy (1.0 = no reduction) |
+| `metrics.vpin_scalar` | float | Confidence multiplier from order-flow toxicity |
+| `metrics.macro_z_score` | float | Z-score vs macro driver spread |
+| `metrics.lock3_score` | float | Transformer sequence validation score |
+
+### `client.check_lock(instrument, injected_data=None)`
+
+Binary EXECUTE / VETO decision. Use this in your order router immediately before placing a trade — reads pre-computed state from Redis so response is sub-millisecond on the server side.
+
+```python
+decision = client.check_lock("EUR_USD")
+if decision["authorized"]:
+    place_order()
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `authorized` | bool | `True` = EXECUTE, `False` = BLOCK |
+| `decision` | str | `"EXECUTE"` or `"BLOCK"` |
+| `forensics.failed_lock` | str | Which lock blocked, or `"NONE"` |
+| `forensics.vpin_toxicity` | float | Current VPIN — > 0.75 = toxic |
+| `forensics.pip_multiplier` | int | Correct pip factor for this instrument |
+| `forensics.execution_intelligence.execution_benchmarks.vwap_deviation_bps` | float | Distance from VWAP in basis points |
+| `forensics.execution_intelligence.capacity_metrics.suggested_max_clip_usd` | float | Max recommended trade size |
 
 ### `client.get_entry_signal(instrument)`
 

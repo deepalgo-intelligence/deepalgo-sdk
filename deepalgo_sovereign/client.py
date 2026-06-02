@@ -1,3 +1,4 @@
+import time
 import requests
 
 class DeepAlgoClient:
@@ -32,6 +33,8 @@ class DeepAlgoClient:
             "X-DeepAlgo-Key": self.api_key,
             "Content-Type": "application/json"
         }
+        self._regime_cache: dict = {}   # {asset: {"data": ..., "ts": float}}
+        self._cache_ttl: int    = 300   # seconds before cache entry expires
 
     def verify_regime(self, asset: str, use_tlock: bool = True):
         """
@@ -44,11 +47,17 @@ class DeepAlgoClient:
         params = {"use_tlock": str(use_tlock).lower()}
 
         try:
-            # Pass the params into the requests.get call
             response = requests.get(url, headers=self.headers, params=params, timeout=120)
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            self._regime_cache[asset] = {"data": data, "ts": time.time()}
+            return data
         except requests.exceptions.RequestException as e:
+            cached = self._regime_cache.get(asset)
+            if cached and (time.time() - cached["ts"]) < self._cache_ttl:
+                cached_data = dict(cached["data"])
+                cached_data["_cached"] = True
+                return cached_data
             return {"is_favorable": False, "veto_reason": f"CONNECTION_ERROR: {str(e)}"}
 
     def get_entry_signal(self, instrument: str) -> dict:
@@ -79,15 +88,41 @@ class DeepAlgoClient:
             return {"entry_quality": "NO_DATA", "current_ou_z": 0.0,
                     "calibrated": False, "error": str(e)}
 
-    def validate_sequence(self, asset: str, candles: list):
+    def check_lock(self, instrument: str, injected_data: list = None) -> dict:
         """
-        Checks the full Triple-Lock (Lock 1, 2, and 3) using 60 candles.
+        Binary EXECUTE / VETO decision for wiring into an execution management system.
+
+        Reads pre-computed regime state from Redis — sub-millisecond response, no OANDA
+        call on the server side.  Use this in your order-routing logic immediately before
+        placing a trade.
+
+        :param instrument: OANDA instrument name, e.g. ``'EUR_USD'``
+        :param injected_data: Optional list of OHLCV dicts — substitute your own
+            (e.g. LMAX) candle data instead of the server's OANDA feed.
+        :returns: dict with keys:
+
+            - ``authorized`` (bool): True = EXECUTE, False = BLOCK
+            - ``decision`` (str): ``"EXECUTE"`` or ``"BLOCK"``
+            - ``forensics.failed_lock`` (str): which lock blocked the trade, or ``"NONE"``
+            - ``forensics.vpin_toxicity`` (float): current VPIN score
+            - ``forensics.pip_multiplier`` (int): correct pip factor for this instrument
+            - ``forensics.execution_intelligence``: VWAP deviation, slippage estimate,
+              suggested max clip size
+
+        Usage::
+
+            decision = client.check_lock("EUR_USD")
+            if decision["authorized"]:
+                place_order()
         """
-        url = f"{self.base_url}/v1/validate_sequence"
-        payload = {"asset": asset, "candles": candles}
+        url = f"{self.base_url}/v1/bridge/check-lock"
+        payload: dict = {"instrument": instrument}
+        if injected_data is not None:
+            payload["injected_data"] = injected_data
         try:
-            response = requests.post(url, headers=self.headers, json=payload, timeout=5)
+            response = requests.post(url, headers=self.headers, json=payload, timeout=30)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
-            return {"is_authorized": False, "verdict": "CONNECTION_ERROR", "error": str(e)}
+            return {"authorized": False, "decision": "BLOCK",
+                    "forensics": {"reason_code": f"CONNECTION_ERROR: {e}"}}
