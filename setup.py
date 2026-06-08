@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="deepalgo-sovereign",
-    version="0.2.1",
+    version="0.2.2",
     author="DeepAlgo Intelligence",
     author_email="support@deepalgo.co.uk",
     description="Python SDK for the DeepAlgo Sovereign AI Regime API",

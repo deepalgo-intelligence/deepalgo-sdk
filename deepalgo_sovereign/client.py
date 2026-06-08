@@ -88,6 +88,61 @@ class DeepAlgoClient:
             return {"entry_quality": "NO_DATA", "current_ou_z": 0.0,
                     "calibrated": False, "error": str(e)}
 
+    def get_session_signal_quality(self, instrument: str) -> dict:
+        """
+        Returns the DML-calibrated session signal quality for an instrument.
+
+        Based on a Double Machine Learning study across 32 G10 FX, metals, and
+        bond instruments (DeepAlgo Sovereign Research, Bletchley Intelligence Ltd).
+        For each session, reports whether the OFI signal is structural or spurious,
+        and the threshold multiplier applied internally to the Lock 3 gate.
+
+        :param instrument: OANDA instrument name (e.g. 'EUR_USD', 'USD_JPY')
+        :returns: dict with keys:
+
+            - instrument       (str):   normalised instrument name
+            - current_session  (str):   'Asian' | 'London' | 'NewYork'
+            - current_quality  (str):   'STRUCTURAL' | 'MIXED' | 'SPURIOUS' | 'UNKNOWN'
+            - current_multiplier (float): Lock 3 threshold multiplier active right now
+            - sessions (dict):  per-session breakdown — quality, multiplier, ic_reduction_pct
+            - last_calibrated  (str):   date of the most recent DML calibration run
+
+        Multiplier interpretation::
+
+            STRUCTURAL  1.0×  OFI signal is genuine — standard Lock 3 threshold
+            MIXED       1.1×  Partial spurious component — threshold raised 10%
+            SPURIOUS    1.3×  Predominantly macro noise — threshold raised 30%
+
+        The key finding: EUR/USD in Asian hours (00–08 UTC) is 99.6% spurious.
+        USD/JPY in Asian hours is only 2.7% spurious — Tokyo institutional flow
+        is genuine. Session matters more than the signal itself.
+
+        Usage::
+
+            sq = client.get_session_signal_quality("EUR_USD")
+            print(sq["current_session"])    # "Asian"
+            print(sq["current_quality"])    # "SPURIOUS"
+            print(sq["current_multiplier"]) # 1.3
+
+            # Combine with regime check for highest-confidence entries
+            if sq["current_quality"] != "SPURIOUS":
+                regime = client.verify_regime("EUR_USD")
+        """
+        url = f"{self.base_url}/session-signal-quality/{instrument}"
+        try:
+            response = requests.get(url, headers=self.headers, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            return {
+                "instrument":         instrument,
+                "current_session":    "UNKNOWN",
+                "current_quality":    "UNKNOWN",
+                "current_multiplier": 1.1,
+                "sessions":           {},
+                "error":              str(e),
+            }
+
     def check_lock(self, instrument: str, injected_data: list = None) -> dict:
         """
         Binary EXECUTE / VETO decision for wiring into an execution management system.

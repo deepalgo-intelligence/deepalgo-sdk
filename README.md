@@ -1,6 +1,6 @@
 # DeepAlgo Sovereign SDK
 
-Python client for the [DeepAlgo Sovereign](https://deepalgo.co.uk) AI Regime API — institutional-grade regime classification, entry signal quality, and order-flow intelligence across FX, metals, indices, and commodities.
+Python client for the [DeepAlgo Sovereign](https://deepalgo.co.uk) AI Regime API — institutional-grade regime classification, entry signal quality, session-stratified causal signal quality, and order-flow intelligence across FX, metals, indices, and commodities.
 
 ## Installation
 
@@ -33,7 +33,23 @@ print(regime["metrics"]["vpin_at_time"])             # 0.31
 print(regime["stability_score"])                     # "82.4%"
 ```
 
-### 3. Check entry signal quality
+### 3. Check session signal quality
+
+```python
+sq = client.get_session_signal_quality("EUR_USD")
+print(sq["current_session"])     # "Asian"
+print(sq["current_quality"])     # "SPURIOUS"
+print(sq["current_multiplier"])  # 1.3
+
+# EUR/USD in Asian hours: 99.6% of raw OFI signal is macro noise — not structural.
+# USD/JPY in Asian hours: only 2.7% spurious — Tokyo institutional flow is genuine.
+
+# All three sessions at a glance:
+for session, data in sq["sessions"].items():
+    print(f"{session}: {data['quality']} ({data['ic_reduction_pct']:+.1f}% IC change)")
+```
+
+### 4. Check entry signal quality
 
 ```python
 signal = client.get_entry_signal("EUR_USD")
@@ -110,6 +126,28 @@ if decision["authorized"]:
 | `forensics.execution_intelligence.execution_benchmarks.vwap_deviation_bps` | float | Distance from VWAP in basis points |
 | `forensics.execution_intelligence.capacity_metrics.suggested_max_clip_usd` | float | Max recommended trade size |
 
+### `client.get_session_signal_quality(instrument)`
+
+Returns the DML-calibrated session signal quality for an instrument. Based on a Double Machine Learning study across 32 G10 FX, metals, and bond instruments — identifies whether order flow imbalance carries structural predictive content in the current session, or whether it is predominantly spurious macro co-movement.
+
+| Field | Type | Description |
+|---|---|---|
+| `current_session` | str | `"Asian"`, `"London"`, or `"NewYork"` |
+| `current_quality` | str | `"STRUCTURAL"`, `"MIXED"`, `"SPURIOUS"`, or `"UNKNOWN"` |
+| `current_multiplier` | float | Lock 3 threshold multiplier currently active (`1.0`, `1.1`, or `1.3`) |
+| `sessions` | dict | Per-session breakdown: quality, multiplier, ic_reduction_pct, structural_ic |
+| `last_calibrated` | str | Date of most recent DML calibration run |
+
+**Multiplier guide:**
+
+| Quality | Multiplier | Meaning |
+|---|---|---|
+| `STRUCTURAL` | 1.0× | OFI signal is genuine — standard threshold |
+| `MIXED` | 1.1× | Partial spurious component — threshold raised 10% |
+| `SPURIOUS` | 1.3× | Predominantly macro noise — threshold raised 30% |
+
+**Research note:** The Asian session finding is the sharpest result. EUR/USD in Asian hours (00–08 UTC) loses 99.6% of its apparent OFI signal to confounder exposure — it is almost entirely spurious. USD/JPY in the same session loses only 2.7% — Tokyo institutional participation is genuine. The difference is not in the signal. It is in who is trading. Source: *DeepAlgo Sovereign Research, Bletchley Intelligence Ltd.*
+
 ### `client.get_entry_signal(instrument)`
 
 Returns OU-calibrated entry timing quality. Derived from 60-day IC analysis across 76 instruments — identifies whether the current moment is a statistically optimal entry point, not just whether the regime is right.
@@ -149,7 +187,9 @@ The API covers 76+ instruments across four asset classes:
 | API calls / day | 50 | Unlimited | Unlimited |
 | `verify_regime()` | ✓ | ✓ | ✓ |
 | `get_entry_signal()` | — | ✓ | ✓ |
+| `get_session_signal_quality()` | — | ✓ | ✓ |
 | OU-calibrated entry timing | — | ✓ | ✓ |
+| DML session quality (32 instruments) | — | ✓ | ✓ |
 | Institutional order-flow VPIN | — | — | ✓ |
 | Cross-client Network Intelligence | — | — | ✓ |
 
@@ -170,4 +210,4 @@ print(r.json())
 
 ---
 
-*DeepAlgo Sovereign SDK v0.2.0 — MIT License*
+*DeepAlgo Sovereign SDK v0.2.2 — MIT License*
