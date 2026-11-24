@@ -3,6 +3,6 @@ from .emsx import SovereignEMSXHook, RegimeDecision
 
 SovereignClient = DeepAlgoClient  # alias — both names work
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 __all__ = ["DeepAlgoClient", "SovereignClient", "ExecutionResult",
            "SovereignEMSXHook", "RegimeDecision"]

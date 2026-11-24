@@ -161,6 +161,16 @@ class DeepAlgoClient:
             exactly what ran). ``carry``/``divergence`` are planned, not yet
             available — passing either raises a 422 from the API, not a
             silent fallback to the default.
+
+        **Enforcement is opt-in (2026-11-22):** the response always includes
+        ``would_veto`` (what the raw gauntlet concluded), ``enforcement_mode``
+        (your account's setting — ``'monitor_only'`` by default), and
+        ``holdback_reason``. ``is_favorable`` reflects what actually happened
+        for you, which is ``True`` whenever ``enforcement_mode`` is
+        ``'monitor_only'`` even if ``would_veto`` is ``True`` — call
+        ``set_enforcement_mode('enforce')`` if you want a raw veto to
+        actually be reflected as unfavorable (subject to a randomised
+        hold-back on a fraction of enforce-mode events, by design).
         """
         # We pass the toggles as query parameters
         url = f"{self.base_url}/regime/{asset}"
@@ -617,13 +627,25 @@ class DeepAlgoClient:
             (e.g. LMAX) candle data instead of the server's OANDA feed.
         :returns: dict with keys:
 
-            - ``authorized`` (bool): True = EXECUTE, False = BLOCK
+            - ``authorized`` (bool): True = EXECUTE, False = BLOCK — reflects what
+              actually happened for you, not just the raw gauntlet verdict
             - ``decision`` (str): ``"EXECUTE"`` or ``"BLOCK"``
-            - ``forensics.failed_lock`` (str): which lock blocked the trade, or ``"NONE"``
+            - ``would_veto`` (bool): the raw gauntlet's own verdict, regardless of
+              your enforcement setting
+            - ``enforcement_mode`` (str): ``'monitor_only'`` (default) or ``'enforce'``
+            - ``holdback_reason`` (str | None): why a raw veto wasn't enforced, if
+              applicable (``'client_monitor_only_mode'`` or ``'random_holdback'``)
+            - ``forensics.failed_lock`` (str): which lock the raw gauntlet flagged, or ``"NONE"``
             - ``forensics.vpin_toxicity`` (float): current VPIN score
             - ``forensics.pip_multiplier`` (int): correct pip factor for this instrument
             - ``forensics.execution_intelligence``: VWAP deviation, slippage estimate,
               suggested max clip size
+
+        **Enforcement is opt-in** — every account defaults to ``monitor_only``
+        (``authorized`` is always ``True`` unless you've opted in, regardless of
+        ``would_veto``). Call ``set_enforcement_mode('enforce')`` to have a raw
+        veto actually block the trade, subject to a randomised hold-back on a
+        fraction of enforce-mode events, by design.
 
         Usage::
 
@@ -642,6 +664,54 @@ class DeepAlgoClient:
         except requests.exceptions.RequestException as e:
             return {"authorized": False, "decision": "BLOCK",
                     "forensics": {"reason_code": f"CONNECTION_ERROR: {e}"}}
+
+    def get_enforcement_mode(self) -> dict:
+        """
+        Read this account's current veto enforcement mode.
+
+        Every account defaults to ``'monitor_only'``: ``verify_regime()`` and
+        ``check_lock()`` both always report the raw gauntlet verdict via
+        ``would_veto``, but nothing is actually blocked unless you've opted
+        into ``'enforce'`` — and even then, a random fraction of would-be
+        vetoes are deliberately held back rather than acted on, so a genuine
+        comparison group exists for evaluating whether enforcement helps.
+
+        :returns: dict with keys ``mode``, ``holdback_prob_if_enforce``, ``note``
+
+        Usage::
+
+            mode = client.get_enforcement_mode()
+            print(mode["mode"])  # "monitor_only"
+        """
+        url = f"{self.base_url}/enforcement-mode"
+        try:
+            response = requests.get(url, headers=self.headers, timeout=15)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            return {"mode": "monitor_only", "error": str(e)}
+
+    def set_enforcement_mode(self, mode: str) -> dict:
+        """
+        Set this account's veto enforcement mode.
+
+        :param mode: ``'enforce'`` to have a raw veto actually block the order
+            (subject to the random hold-back described in ``get_enforcement_mode()``),
+            or ``'monitor_only'`` (the default) to only ever receive the raw
+            verdict without anything being blocked.
+        :returns: ``{'mode': str, 'status': 'updated'}`` on success
+
+        Usage::
+
+            client.set_enforcement_mode("enforce")
+        """
+        url = f"{self.base_url}/enforcement-mode"
+        try:
+            response = requests.post(url, json={"mode": mode}, headers=self.headers, timeout=15)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            return {"status": "error", "error": str(e)}
 
     def execute_and_track(
         self,

@@ -10,6 +10,36 @@ were bumped in `setup.py` but never actually published to PyPI** — the
 installed package on PyPI today is still 0.2.0. This release (0.2.4) is
 the real "what's new since the last thing anyone actually installed."
 
+## [0.2.5] — 2026-11-22
+
+### Added
+- `get_enforcement_mode()` / `set_enforcement_mode()` — enforcement is
+  now explicit and client-controlled. Every account defaults to
+  `monitor_only`: the regime/sequence gauntlet verdict is always
+  computed and returned in full, but nothing is blocked until the
+  client explicitly opts into `enforce` mode. This gives institutional
+  clients a controlled, auditable path to activation — observe the
+  verdict stream first, enable enforcement once you've validated it
+  against your own flow, rather than a third-party system holding
+  unsupervised trade-blocking authority from day one.
+- `verify_regime()` / `check_lock()`: responses now include `would_veto`
+  (the raw gauntlet verdict regardless of mode), `enforcement_mode`, and
+  `holdback_reason`. `is_favorable` / `authorized` continue to reflect
+  the real, actionable outcome under the caller's own mode — existing
+  integrations that only check those fields need no code changes; they
+  simply see the new default (observe, not block) until the client
+  opts in.
+- **Enforce-mode calibration period**: while `enforce` mode is active, a
+  random, non-signal-dependent fraction of would-be-veto events
+  (currently ~20%, see `get_enforcement_mode()`) are deliberately not
+  enforced, to build an unbiased, randomized measurement of real-world
+  effect rather than relying on observational data alone. This is
+  disclosed per-response via `holdback_reason`, and in the Terms of
+  Service (Section 3.1). It will be reduced or removed once sufficient
+  evidence has accumulated. Clients requiring guaranteed enforcement of
+  every veto should remain in `monitor_only` and apply `would_veto`
+  manually in the interim.
+
 ## [0.2.4] — 2026-11-17 (first publish since 0.2.0)
 
 ### Added

@@ -40,6 +40,7 @@ print(regime["metrics"]["regime"])                   # "MEAN_REVERTING"
 print(regime["metrics"]["composite_confidence"])     # 0.7843
 print(regime["metrics"]["vpin_at_time"])             # 0.31
 print(regime["stability_score"])                     # "82.4%"
+print(regime["enforcement_mode"])                    # "monitor_only" (default — see below)
 ```
 
 ### 3. Check session signal quality
@@ -109,8 +110,11 @@ the complete three-lock gauntlet — typically 2–8 seconds.
 
 | Field | Type | Description |
 |---|---|---|
-| `is_favorable` | bool | `True` if all three locks pass |
-| `veto_reason` | str \| None | Gate that blocked — `REGIME_VETO`, `AI_PROXY_VETO`, `TRANSFORMER_VETO`, `ENTROPY_VETO`, or `None` |
+| `is_favorable` | bool | `True` if all three locks pass **or** your account is in `monitor_only` mode (the default — see `get_enforcement_mode()`) |
+| `would_veto` | bool | The raw gauntlet's own verdict, independent of your enforcement setting |
+| `enforcement_mode` | str | `"monitor_only"` (default) or `"enforce"` |
+| `holdback_reason` | str \| None | Why a raw veto wasn't enforced, if applicable — `"client_monitor_only_mode"`, `"random_holdback"`, or `None` |
+| `veto_reason` | str \| None | Gate the raw gauntlet flagged — `REGIME_VETO`, `AI_PROXY_VETO`, `TRANSFORMER_VETO`, `ENTROPY_VETO`, or `None`. This is independent of whether it was actually enforced. |
 | `stability_score` | str | Lock 2 neural stability as a percentile, e.g. `"82.4%"` |
 | `divergence` | str | Divergence label — `"NONE"` when regime is clean |
 | `metrics.regime` | str | Classified market state — e.g. `"MEAN_REVERTING"`, `"TRENDING"`, `"HIGH_VOL"` |
@@ -130,6 +134,27 @@ Binary EXECUTE / VETO decision. Use this in your order router immediately before
 decision = client.check_lock("EUR_USD")
 if decision["authorized"]:
     place_order()
+```
+
+`decision["authorized"]` already reflects your `enforcement_mode` setting
+(default `monitor_only`, so `authorized` is `True` unless you've opted in
+to `enforce` — see below). `decision["would_veto"]` is the raw gauntlet
+verdict regardless of that setting.
+
+### `client.get_enforcement_mode()` / `client.set_enforcement_mode(mode)`
+
+Every account defaults to `monitor_only`: `verify_regime()` and
+`check_lock()` always report the raw gauntlet verdict (`would_veto`), but
+nothing is actually blocked unless you opt into `enforce`. Even in
+`enforce` mode, a random fraction of would-be vetoes (chosen by a coin
+flip, not by how strong the signal looked) are deliberately held back
+rather than acted on — this builds a genuine comparison group for
+evaluating whether enforcement actually helps, instead of us just
+asserting that it does.
+
+```python
+client.get_enforcement_mode()          # {"mode": "monitor_only", ...}
+client.set_enforcement_mode("enforce") # opt in
 ```
 
 | Field | Type | Description |
