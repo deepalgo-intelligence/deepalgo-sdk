@@ -1,16 +1,106 @@
 import time
 import requests
 
+
+class ExecutionResult:
+    """Combined regime verdict + fill benchmark returned by ``execute_and_track()``.
+
+    Regime fields (always present)::
+
+        result.is_favorable   → bool   — True if regime gate passed
+        result.verdict        → str    — 'APPROVED' or 'VETO'
+        result.veto_reason    → str|None — reason code when vetoed
+        result.regime         → dict   — full raw regime response
+
+    Fill benchmark fields (None when ``slippage_pips`` / ``venue`` not provided)::
+
+        result.your_percentile           → int|None  — % of network with worse slippage
+        result.recommended_venue_next_time → str|None — best venue from collective fills
+        result.potential_saving_pips     → float|None — saving vs network median
+        result.network_sample_size       → int|None  — fills in benchmark bucket
+        result.fill_verdict              → str|None  — ABOVE_MEDIAN | AT_MEDIAN | BELOW_MEDIAN
+        result.fill_benchmark            → dict|None — full raw fill response
+    """
+
+    def __init__(self, regime: dict, fill_benchmark: dict | None = None):
+        self._regime = regime
+        self._fill   = fill_benchmark or {}
+
+    # ── regime properties ──────────────────────────────────────────────────────
+
+    @property
+    def is_favorable(self) -> bool:
+        return bool(self._regime.get("is_favorable", False))
+
+    @property
+    def verdict(self) -> str:
+        if "verdict" in self._regime:
+            return str(self._regime["verdict"])
+        return "APPROVED" if self.is_favorable else "VETO"
+
+    @property
+    def veto_reason(self) -> str | None:
+        return self._regime.get("veto_reason")
+
+    @property
+    def regime(self) -> dict:
+        return self._regime
+
+    # ── fill benchmark properties (None when no fill submitted) ────────────────
+
+    @property
+    def your_percentile(self) -> int | None:
+        v = self._fill.get("your_percentile")
+        return int(v) if v is not None else None
+
+    @property
+    def recommended_venue_next_time(self) -> str | None:
+        return self._fill.get("recommended_venue_next_time")
+
+    @property
+    def potential_saving_pips(self) -> float | None:
+        v = self._fill.get("potential_saving_pips")
+        return float(v) if v is not None else None
+
+    @property
+    def network_sample_size(self) -> int | None:
+        v = self._fill.get("network_sample_size")
+        return int(v) if v is not None else None
+
+    @property
+    def fill_verdict(self) -> str | None:
+        return self._fill.get("verdict")
+
+    @property
+    def fill_benchmark(self) -> dict | None:
+        return self._fill if self._fill else None
+
+    def __repr__(self) -> str:
+        parts = [f"verdict={self.verdict!r}"]
+        if self.your_percentile is not None:
+            parts.append(f"your_percentile={self.your_percentile}")
+        return f"ExecutionResult({', '.join(parts)})"
+
+
 class DeepAlgoClient:
     @classmethod
     def enroll(cls, email: str, base_url: str = "https://api.deepalgo.co.uk") -> None:
         """
         Register for a free API key. Your key is emailed within seconds — no card required.
 
-        Usage::
+        Three-step flow::
+
+            # Step 1 — request your key (returns immediately)
             DeepAlgoClient.enroll("you@email.com")
-            # Check your inbox, then:
-            client = DeepAlgoClient(api_key="your_key_here")
+
+            # Step 2 — check your inbox (including spam) for the welcome email
+            #           containing your API key (arrives within ~5 seconds)
+
+            # Step 3 — use the key
+            client = DeepAlgoClient(api_key="da_free_xxxxxxxxxxxx")
+            regime = client.verify_regime("EUR_USD")
+
+        If the email address is already registered, your existing key is resent.
         """
         url = f"{base_url.rstrip('/')}/register/free"
         try:
@@ -20,7 +110,8 @@ class DeepAlgoClient:
             elif r.status_code == 429:
                 print("Rate limit reached — please wait an hour and try again.")
             elif r.status_code == 422:
-                print("Please supply a valid email address.")
+                detail = r.json().get("detail", "Please supply a valid email address.")
+                print(detail)
             else:
                 print(f"Registration failed ({r.status_code}). Contact support@deepalgo.co.uk")
         except Exception as exc:
@@ -36,15 +127,44 @@ class DeepAlgoClient:
         self._regime_cache: dict = {}   # {asset: {"data": ..., "ts": float}}
         self._cache_ttl: int    = 300   # seconds before cache entry expires
 
-    def verify_regime(self, asset: str, use_tlock: bool = True):
+    def verify_regime(self, asset: str, use_tlock: bool = True, strategy_type: str = "mean_reversion"):
         """
-        Checks the AI Regime (Lock 1, 2 & 3) for a specific asset.
+        Full AI regime check for a specific asset.
+
+        This endpoint fetches live market data and runs the regime gauntlet
+        matched to ``strategy_type``. Response time is typically 2–8 seconds
+        depending on market data latency.
+
+        **For production / high-frequency use**: call ``check_lock()`` instead.
+        It reads from a pre-computed Redis cache updated every 60 seconds and
+        responds in under 100 ms — no live data fetch.
+
+        Use ``verify_regime()`` when:
+        - You want a fresh on-demand check during strategy development
+        - You are evaluating an instrument for the first time
+        - You want the full regime metadata (confidence, entropy, VPIN percentile)
+
+        Use ``check_lock()`` when:
+        - You are routing orders in real-time and need a fast binary EXECUTE/VETO
+        - You are polling on every bar in a live strategy loop
+
         :param asset: The instrument name (e.g., 'EUR_USD')
-        :param use_tlock: Boolean toggle to enable/disable the Transformer Lock (Lock 3)
+        :param use_tlock: Toggle the Transformer Lock (Lock 3). Default True.
+            Only meaningful for ``strategy_type='mean_reversion'``.
+        :param strategy_type: ``'mean_reversion'`` (default, the original
+            four-signal gauntlet — HMM mean-reversion state, Neural Proxy,
+            entropy, Transformer sequence score) or ``'trend'`` (2026-11-17,
+            a different lens on the same endpoint for trend/momentum entries
+            — a deliberately lighter two-signal check, since the two MR-
+            trained classifiers above would give wrong answers on a trending
+            market; check the response's ``evaluated_checks`` field for
+            exactly what ran). ``carry``/``divergence`` are planned, not yet
+            available — passing either raises a 422 from the API, not a
+            silent fallback to the default.
         """
-        # We pass the toggle as a query parameter
+        # We pass the toggles as query parameters
         url = f"{self.base_url}/regime/{asset}"
-        params = {"use_tlock": str(use_tlock).lower()}
+        params = {"use_tlock": str(use_tlock).lower(), "strategy_type": strategy_type}
 
         try:
             response = requests.get(url, headers=self.headers, params=params, timeout=120)
@@ -93,7 +213,7 @@ class DeepAlgoClient:
         Returns the DML-calibrated session signal quality for an instrument.
 
         Based on a Double Machine Learning study across 32 G10 FX, metals, and
-        bond instruments (DeepAlgo Sovereign Research, Bletchley Intelligence Ltd).
+        bond instruments (DeepAlgo Sovereign Research, DeepAlgo Ltd).
         For each session, reports whether the OFI signal is structural or spurious,
         and the threshold multiplier applied internally to the Lock 3 gate.
 
@@ -143,6 +263,347 @@ class DeepAlgoClient:
                 "error":              str(e),
             }
 
+    def get_decision(self, instrument: str, position_state: str,
+                      exposure_side: str = None, hold_hours_so_far: float = None,
+                      lookahead_hours: float = 12.0) -> dict:
+        """
+        Returns the unified five-action decision for an instrument, composing
+        the regime/entry/session-quality gates (flat) or hedge-timing/risk-
+        warehousing advisories (holding) into a single recommendation.
+
+        :param instrument: OANDA instrument name (e.g. 'EUR_USD', 'XAU_USD')
+        :param position_state: 'flat' (no position, considering entry) or
+            'holding' (already holding, considering continue vs. hedge)
+        :param exposure_side: required when position_state='holding' —
+            'long' or 'short', the side of the EXISTING position
+        :param hold_hours_so_far: required when position_state='holding' —
+            active-hours this position has been open
+        :param lookahead_hours: only used when position_state='holding'
+        :returns: dict with keys:
+
+            - instrument      (str)
+            - position_state  (str): 'flat' | 'holding'
+            - action          (str): 'act_now' | 'delay_action' | 'reject_action'
+              (flat only) | 'maintain_current_state' | 'transfer_risk' (holding only)
+            - reason          (str): plain-English reason for the action
+            - signals         (dict): the raw underlying signal values used
+            - recheck_after_minutes (float, only present when action='delay_action')
+            - experimental_confidence_check (dict, flat only, advisory -- never
+              changes `action`; see its own 'note' field)
+
+        On any request failure, returns action='delay_action' — the safe
+        default (retry shortly) rather than silently proceeding or blocking
+        permanently.
+
+        Usage::
+
+            d = client.get_decision('EUR_USD', position_state='flat')
+            if d['action'] == 'act_now':
+                # proceed with entry
+                pass
+        """
+        params = {"position_state": position_state}
+        if exposure_side is not None:
+            params["exposure_side"] = exposure_side
+        if hold_hours_so_far is not None:
+            params["hold_hours_so_far"] = hold_hours_so_far
+        if position_state == "holding":
+            params["lookahead_hours"] = lookahead_hours
+
+        url = f"{self.base_url}/decision/{instrument}"
+        try:
+            response = requests.get(url, params=params, headers=self.headers, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            return {
+                "instrument": instrument,
+                "position_state": position_state,
+                "action": "delay_action",
+                "reason": "Decision check failed — defaulting to the safe retry action.",
+                "signals": {},
+                "recheck_after_minutes": 5.0,
+                "error": str(e),
+            }
+
+    def get_decision_breadth(self) -> dict:
+        """
+        Returns the current market-wide breadth of Act Now / Delay / Reject
+        across the tracked instrument universe -- "how much of the market
+        is currently favourable for entry." Not a network effect (the same
+        for every client) -- see the endpoint's own docstring.
+
+        :returns: dict with action_distribution, dominant_action,
+            network_instruments_tracked, computed_at -- or
+            {"status": "INSUFFICIENT_DATA"} if too few instruments have
+            resolved yet.
+        """
+        url = f"{self.base_url}/benchmark/decision-breadth"
+        try:
+            response = requests.get(url, headers=self.headers, timeout=15)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            return {"status": "INSUFFICIENT_DATA", "error": str(e)}
+
+    def submit_decision_outcome(self, instrument: str, action_received: str,
+                                 favorable: bool, assessed_at: str = None) -> dict:
+        """
+        Reports back whether a previously-received get_decision() verdict
+        actually turned out favourable. Anonymised on ingest -- your
+        api_key is never stored. This is the genuine network-effect half
+        of the decision framework: more clients reporting real outcomes
+        improves get_decision_accuracy() for everyone, not just you.
+
+        Usage::
+
+            d = client.get_decision('EUR_USD', position_state='flat')
+            # ... later, once you know how it played out ...
+            client.submit_decision_outcome('EUR_USD', d['action'], favorable=True)
+        """
+        url = f"{self.base_url}/decision/outcome"
+        payload = {"instrument": instrument, "action_received": action_received,
+                   "favorable": favorable, "assessed_at": assessed_at}
+        try:
+            response = requests.post(url, json=payload, headers=self.headers, timeout=15)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            return {"status": "error", "error": str(e)}
+
+    def get_decision_accuracy(self) -> dict:
+        """
+        Returns the pooled, anonymised, client-reported empirical accuracy
+        per /decision/ action type -- how often 'act_now' verdicts (etc.)
+        actually turned out well, across the whole client base.
+
+        :returns: dict with by_action (per-action n + favorable_rate, or
+            INSUFFICIENT_DATA if fewer than 10 real reports) and
+            total_outcomes.
+        """
+        url = f"{self.base_url}/benchmark/decision-accuracy"
+        try:
+            response = requests.get(url, headers=self.headers, timeout=15)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            return {"by_action": {}, "total_outcomes": 0, "error": str(e)}
+
+    def get_fill_quality(self, instrument: str) -> dict:
+        """
+        Returns a real-time execution quality advisory based on live market
+        microstructure conditions.
+
+        This endpoint does **not** require or observe your firm's fill data.
+        The advisory is derived from VPIN toxicity, realized-volatility ratio,
+        and AR1 momentum — signals Sovereign observes in the market, not in
+        your execution records.
+
+        :param instrument: OANDA instrument name (e.g. 'EUR_USD', 'NAS100_USD')
+        :returns: dict with keys:
+
+            - instrument              (str):   normalised instrument name
+            - execution_tier          (str):   'OPTIMAL' | 'ACCEPTABLE' | 'DEGRADED' | 'HOSTILE'
+            - recommendation          (str):   'PROCEED' | 'SIZE_DOWN' | 'DELAY' | 'AVOID'
+            - adverse_fill_probability (float): estimated probability of adverse fill [0–1]
+            - expected_slippage_pips  (dict):  {'low': float, 'high': float}
+            - primary_driver          (str):   dominant condition driving the tier
+            - conditions_note         (str):   plain-English explanation
+            - recommended_venue       (str):   best venue for this instrument right now
+            - venue_quality_scores    (dict):  {venue: score 0–100} from collective client fills
+            - data_quality            (str):   'preliminary_synthetic' | 'production'
+            - signals_observed        (dict):  raw microstructure signals used
+            - basis                   (str):   'market_microstructure_signal'
+            - sources                 (list):  academic citations
+
+        **execution_tier** interpretation::
+
+            OPTIMAL     VPIN < 0.20 — minimal adverse selection, lowest expected slippage
+            ACCEPTABLE  Normal conditions — proceed at standard size
+            DEGRADED    VPIN > 0.40 or high RV — size down or delay
+            HOSTILE     Active VPIN spike — avoid execution until normalised
+
+        **MiFID II Article 27 note:** The timestamped response from this endpoint
+        constitutes pre-trade best-execution evidence for RTS 28 reporting — an
+        independent, timestamped microstructure score at the moment of the decision.
+
+        Usage::
+
+            fq = client.get_fill_quality("EUR_USD")
+            print(fq["execution_tier"])           # "DEGRADED"
+            print(fq["recommendation"])           # "SIZE_DOWN"
+            print(fq["adverse_fill_probability"]) # 0.38
+
+            # Wire into sizing decision
+            regime = client.verify_regime("EUR_USD")
+            if regime["is_favorable"]:
+                fq = client.get_fill_quality("EUR_USD")
+                if fq["recommendation"] == "AVOID":
+                    pass  # defer
+                elif fq["recommendation"] == "SIZE_DOWN":
+                    units = int(units * 0.6)
+        """
+        url = f"{self.base_url}/fill-quality/{instrument}"
+        try:
+            response = requests.get(url, headers=self.headers, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            return {
+                "instrument":               instrument,
+                "execution_tier":           "ACCEPTABLE",
+                "recommendation":           "PROCEED",
+                "adverse_fill_probability": 0.20,
+                "expected_slippage_pips":   {"low": 0.3, "high": 0.8},
+                "primary_driver":           "UNAVAILABLE",
+                "conditions_note":          "Advisory unavailable — proceeding at standard conditions.",
+                "recommended_venue":        "oanda",
+                "venue_quality_scores":     {},
+                "data_quality":             "unavailable",
+                "signals_observed":         {},
+                "basis":                    "fallback",
+                "error":                    str(e),
+            }
+
+    def get_instrument_catalog(
+        self,
+        tier: str = "",
+        asset_class: str = "",
+        include_live_toxicity: bool = True,
+    ) -> dict:
+        """
+        Browse the instrument catalog: every instrument Sovereign covers,
+        which tier unlocks it, its asset class, a relative volatility
+        bucket, typical spread, and (optionally) its current live VPIN
+        toxicity tier.
+
+        Available at every tier, including FREE — this is a reference/
+        browse call, not a per-instrument signal, so a client can see
+        what unlocks at the next tier up before deciding to upgrade.
+
+        :param tier: filter to one tier's catalog — 'FREE' | 'PROFESSIONAL' | 'INSTITUTIONAL' | 'ENTERPRISE'
+        :param asset_class: filter to one asset class — 'FX' | 'INDICES' | 'BONDS' | 'COMMODITIES' | 'METALS'
+        :param include_live_toxicity: set False to skip the live Redis read and return static fields only (faster)
+        :returns: dict with keys:
+
+            - your_tier          (str|None): the calling key's own tier
+            - count              (int):      number of instruments in `instruments`
+            - catalog_built_at   (str|None): when the static vol/spread data was last built
+            - instruments        (list[dict]): one row per instrument —
+
+                - short_name              (str):  the exact code every other Sovereign
+                  endpoint uses (e.g. 'EUR_USD') — intentionally not a separate
+                  "generic" symbology, so this value can be passed straight into
+                  verify_regime()/get_fill_quality()/get_entry_signal() unchanged
+                - full_name               (str):  human-readable name, e.g. "Euro / US Dollar"
+                - asset_class             (str):  'FX' | 'INDICES' | 'BONDS' | 'COMMODITIES' | 'METALS'
+                - min_tier                (str):  lowest tier that unlocks this instrument
+                - available_to_you        (bool): whether your own key can query it today
+                - realized_vol_annualized_pct (float|None)
+                - vol_bucket              (str|None): 'LOW'|'MEDIUM'|'HIGH'|'EXTREME' — a RELATIVE
+                  percentile rank within the full universe, not an absolute cutoff
+                - avg_spread_pips         (float|None)
+                - current_toxicity_tier   (str|None): 'OPTIMAL'|'ACCEPTABLE'|'DEGRADED'|'HOSTILE'|None —
+                  a lightweight live VPIN read; for an execution decision on one
+                  specific instrument, call get_fill_quality() instead, which
+                  layers in regime/AR1/RV on top of VPIN
+
+            - by_tier (dict[str, list[str]]): each tier's full catalog, for reference
+
+        Usage::
+
+            cat = client.get_instrument_catalog(tier="INSTITUTIONAL", asset_class="FX")
+            hostile_now = [i["short_name"] for i in cat["instruments"]
+                           if i["current_toxicity_tier"] == "HOSTILE"]
+        """
+        url = f"{self.base_url}/instruments"
+        params = {"include_live_toxicity": include_live_toxicity}
+        if tier:
+            params["tier"] = tier
+        if asset_class:
+            params["asset_class"] = asset_class
+        try:
+            response = requests.get(url, headers=self.headers, params=params, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            return {
+                "your_tier": None, "count": 0, "catalog_built_at": None,
+                "instruments": [], "by_tier": {}, "error": str(e),
+            }
+
+    def submit_fill(
+        self,
+        instrument:       str,
+        venue:            str,
+        slippage_pips:    float,
+        adverse_fill:     bool,
+        *,
+        side:             str | None   = None,
+        vpin_at_fill:     float | None = None,
+        session:          str | None   = None,
+        regime_state:     str | None   = None,
+        order_size_units: int | None   = None,
+    ) -> dict:
+        """
+        Submit an anonymised post-trade fill observation for collective venue intelligence.
+
+        Sovereign aggregates fill data across all participating clients to compute
+        collective venue quality scores returned in ``get_fill_quality()``
+        as ``recommended_venue`` and ``venue_quality_scores``.
+
+        **Your api_key is never stored.**  All data is anonymised on ingest —
+        only market conditions (instrument, venue, slippage, session) are retained.
+
+        **Sovereign and Enterprise tiers only.**
+
+        :param instrument:       OANDA instrument name (e.g. ``'EUR_USD'``)
+        :param venue:            Broker/venue used (e.g. ``'oanda'``, ``'lmax'``, ``'ib'``)
+        :param slippage_pips:    Observed slippage in pips (positive = adverse, negative = favourable)
+        :param adverse_fill:     True if the fill was worse than the signal price
+        :param side:             ``'BUY'`` or ``'SELL'`` (optional)
+        :param vpin_at_fill:     VPIN score at time of fill (optional — enriches the model)
+        :param session:          ``'ASIAN'`` / ``'LONDON'`` / ``'NY'`` / ``'OFF'`` (optional)
+        :param regime_state:     Regime label at fill time (optional)
+        :param order_size_units: Order size in units (optional)
+        :returns: ``{'status': 'accepted', 'instrument': str}`` on success
+
+        Usage::
+
+            # After your trade fills:
+            client.submit_fill(
+                instrument="EUR_USD",
+                venue="lmax",
+                slippage_pips=0.4,
+                adverse_fill=False,
+                side="BUY",
+                session="LONDON",
+            )
+
+            # The next call to get_fill_quality() will reflect collective data:
+            fq = client.get_fill_quality("EUR_USD")
+            print(fq["recommended_venue"])      # "lmax"
+            print(fq["venue_quality_scores"])   # {"lmax": 84.5, "oanda": 71.2}
+        """
+        url = f"{self.base_url}/execution/fill"
+        payload = {
+            "instrument":       instrument,
+            "venue":            venue,
+            "slippage_pips":    slippage_pips,
+            "adverse_fill":     adverse_fill,
+            "side":             side,
+            "vpin_at_fill":     vpin_at_fill,
+            "session":          session,
+            "regime_state":     regime_state,
+            "order_size_units": order_size_units,
+        }
+        try:
+            response = requests.post(url, json=payload, headers=self.headers, timeout=15)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            return {"status": "error", "error": str(e)}
+
     def check_lock(self, instrument: str, injected_data: list = None) -> dict:
         """
         Binary EXECUTE / VETO decision for wiring into an execution management system.
@@ -181,3 +642,86 @@ class DeepAlgoClient:
         except requests.exceptions.RequestException as e:
             return {"authorized": False, "decision": "BLOCK",
                     "forensics": {"reason_code": f"CONNECTION_ERROR: {e}"}}
+
+    def execute_and_track(
+        self,
+        instrument:       str,
+        *,
+        slippage_pips:    float | None = None,
+        venue:            str | None   = None,
+        adverse_fill:     bool         = False,
+        side:             str | None   = None,
+        vpin_at_fill:     float | None = None,
+        session:          str | None   = None,
+        regime_state:     str | None   = None,
+        order_size_units: int | None   = None,
+        use_tlock:        bool         = True,
+    ) -> "ExecutionResult":
+        """
+        Verify regime AND submit a fill observation in one call.
+
+        Returns an :class:`ExecutionResult` combining the regime verdict with an
+        immediate peer benchmark comparison.  When ``slippage_pips`` and ``venue``
+        are omitted the call behaves identically to ``verify_regime()`` but still
+        returns an ``ExecutionResult`` — adoption is zero-friction for existing callers.
+
+        :param instrument:       OANDA instrument name (e.g. ``'EUR_USD'``)
+        :param slippage_pips:    Observed slippage in pips — supply to trigger fill
+            submission and receive a peer benchmark in the response.
+        :param venue:            Broker/venue used (e.g. ``'oanda'``, ``'lmax'``).
+            Required alongside ``slippage_pips`` to submit a fill.
+        :param adverse_fill:     True if the fill was worse than the signal price.
+        :param side:             ``'BUY'`` or ``'SELL'`` (optional)
+        :param vpin_at_fill:     VPIN score at fill time (optional)
+        :param session:          ``'ASIAN'`` / ``'LONDON'`` / ``'NY'`` (optional)
+        :param regime_state:     Regime label at fill time (optional)
+        :param order_size_units: Order size in units (optional)
+        :param use_tlock:        Toggle Transformer Lock 3. Default True.
+        :returns: :class:`ExecutionResult`
+
+        Usage — replace two manual calls with one::
+
+            # Before (two steps — easy to forget the second):
+            verdict = client.verify_regime("EUR_USD")
+            client.submit_fill("EUR_USD", slippage_pips=1.2, venue="oanda",
+                               adverse_fill=False)
+
+            # After (one call — fill submission is automatic):
+            result = client.execute_and_track(
+                instrument    = "EUR_USD",
+                slippage_pips = 1.2,
+                venue         = "oanda",
+                adverse_fill  = False,
+            )
+            result.verdict                    # "APPROVED"
+            result.your_percentile            # 38
+            result.recommended_venue_next_time # "lmax"
+            result.potential_saving_pips       # 0.3
+
+            # Without fill args — identical to verify_regime():
+            result = client.execute_and_track("EUR_USD")
+            result.is_favorable               # True / False
+            result.your_percentile            # None
+        """
+        regime = self.verify_regime(instrument, use_tlock=use_tlock)
+
+        fill_benchmark: dict | None = None
+        if slippage_pips is not None and venue is not None:
+            raw = self.submit_fill(
+                instrument       = instrument,
+                venue            = venue,
+                slippage_pips    = slippage_pips,
+                adverse_fill     = adverse_fill,
+                side             = side,
+                vpin_at_fill     = vpin_at_fill,
+                session          = session,
+                regime_state     = regime_state,
+                order_size_units = order_size_units,
+            )
+            # Strip envelope fields; keep only the benchmark payload
+            fill_benchmark = {
+                k: v for k, v in raw.items()
+                if k not in ("status", "instrument")
+            }
+
+        return ExecutionResult(regime=regime, fill_benchmark=fill_benchmark)

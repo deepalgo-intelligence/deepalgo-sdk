@@ -1,46 +1,62 @@
 # Changelog
 
-## [0.2.1] — 2026-06-02
+All notable changes to the `deepalgo-sovereign` Python SDK.
+
+No `CHANGELOG.md` existed before this file — reconstructed 2026-11-17 by
+diffing `DeepAlgoClient`'s real methods between the last published release
+(0.2.0) and the current repo HEAD, not from commit messages alone, so this
+is accurate rather than a restatement of intent. **0.2.1, 0.2.2 and 0.2.3
+were bumped in `setup.py` but never actually published to PyPI** — the
+installed package on PyPI today is still 0.2.0. This release (0.2.4) is
+the real "what's new since the last thing anyone actually installed."
+
+## [0.2.4] — 2026-11-17 (first publish since 0.2.0)
 
 ### Added
-- `client.check_lock(instrument, injected_data=None)` — binary EXECUTE / VETO decision
-  for wiring directly into an execution management system or order router. Calls
-  `POST /v1/bridge/check-lock`. Returns `authorized` bool, `decision` string, and full
-  forensics payload: failed lock name, VPIN toxicity, pip multiplier, VWAP deviation,
-  estimated slippage, and suggested max clip size. Graceful `CONNECTION_ERROR` fallback
-  matches the existing `verify_regime()` pattern.
-- `SovereignClient` — alias for `DeepAlgoClient`. Both names import correctly:
-  `from deepalgo_sovereign import SovereignClient`.
+- `verify_regime()` / `check_lock()`: new optional `strategy_type` parameter
+  (`"mean_reversion"` default, `"trend"` new). The default preserves exact
+  prior behaviour for every existing caller. `"trend"` runs a different,
+  deliberately lighter check matched to momentum/breakout entries — see the
+  method's own docstring for exactly which signals run under each value.
+  `"carry"`/`"divergence"` are planned, not yet available (the API returns
+  422, not a silent fallback).
+- `check_lock(instrument)` — fast binary EXECUTE/BLOCK decision, reading
+  from pre-computed state rather than running the full gauntlet.
+- `execute_and_track(...)` + `ExecutionResult` — combines a regime check
+  with fill submission in one call; `ExecutionResult` exposes convenience
+  properties (`is_favorable`, `verdict`, `veto_reason`, `regime`,
+  `your_percentile`, `recommended_venue_next_time`, `potential_saving_pips`,
+  `network_sample_size`) over the raw response dict.
+- `get_fill_quality(instrument)` — execution-quality / adverse-selection
+  advisory (VPIN-driven).
+- `get_instrument_catalog()` — the real, live instrument universe by tier/
+  asset class/volatility/toxicity bucket, replacing any hand-maintained list.
+- `get_session_signal_quality(instrument)`.
+- `get_decision(...)`, `get_decision_accuracy(...)`, `get_decision_breadth(...)`,
+  `submit_decision_outcome(...)` — decision-framework endpoints.
+- `submit_fill(...)` — client fill submission for the collective venue-
+  intelligence network (feeds `recommended_venue`/`venue_quality_scores`
+  in `get_fill_quality()`'s own response for every client on the platform).
+- `deepalgo_sovereign.emsx` — Bloomberg EMSX pre-trade hook module.
+- `SovereignClient` — alias for `DeepAlgoClient` (both names work;
+  `__init__.py`, already present, carried forward unchanged).
 
-### Fixed
-- `verify_regime()` response documentation corrected. Previous README showed
-  `regime_label`, `lock1_pass`, `lock2_pass`, `lock3_pass` fields which do not exist
-  in the API response. Correct fields are `is_favorable`, `veto_reason`,
-  `stability_score`, `metrics.regime`, `metrics.composite_confidence`,
-  `metrics.vpin_at_time`, `metrics.entropy_scalar`, and related `metrics.*` keys.
+### Removed (breaking, if anyone depended on it)
+- `validate_sequence(asset, candles)` — called `POST /v1/validate_sequence`,
+  an endpoint that does not exist anywhere in the current live API (checked
+  directly against `deepalgo_api_4_1.py`). Removing it does not newly break
+  any real integration — the endpoint was already gone, so every call to
+  this method in the published 0.2.0 SDK has only ever been able to return
+  its own `CONNECTION_ERROR` fallback dict, never a real result.
 
-### Removed
-- `validate_sequence()` — was calling `/v1/validate_sequence` which does not exist.
-  `check_lock()` is the correct equivalent for EMS integration.
+## [0.2.1]–[0.2.3] — never published
 
----
+Bumped in `setup.py` during development but never pushed to PyPI. Their
+real content (check_lock, the EMSX hook, docs fixes) is folded into 0.2.4
+above rather than released separately, since nobody has ever installed
+an intermediate version to diff against.
 
-## [0.2.0] — 2026-05-31
+## [0.2.0] — published, currently installed from PyPI
 
-### Added
-- `DeepAlgoClient.enroll(email)` — self-registration classmethod. Provisions a free API key via `POST /register/free` and emails it within seconds. No account creation required.
-- `client.get_entry_signal(instrument)` — OU-calibrated entry timing. Returns live OU z-score, quality band (HIGH/MEDIUM/LOW), optimal entry delay in candles, and best confirmation signal derived from 60-day IC analysis across 76 instruments.
-
-### Changed
-- `verify_regime()` timeout raised from 60s → 120s. Eliminates timeout errors on exotic crosses (XAG_JPY, XAU_JPY, commodity pairs) during peak sweep cycles.
-- Package author updated to DeepAlgo Intelligence / support@deepalgo.co.uk.
-- README rewritten with current API reference, tier table, and quick-start guide.
-
-### Removed
-- `python-dotenv` dependency — not required by the client.
-
----
-
-## [0.1.2] — 2026-03-01
-
-- Initial public release with `verify_regime()` and `validate_sequence()`.
+`enroll()`, `get_entry_signal()`, `verify_regime()`, `validate_sequence()`
+(see Removed above), updated branding.
